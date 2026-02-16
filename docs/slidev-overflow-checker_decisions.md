@@ -1,0 +1,223 @@
+- 日時：2026-02-15T16:15:00Z
+- 事項：プロジェクトのPlaywright直結実装をPlaywright CLIセッション駆動へ全面置換し、並列化単位をセッションに統一する
+- 背景：既存実装は`playwright` API直接呼び出しで、同一セッション内並列に起因する競合を避けにくかった。ユーザー要求は「Playwright_CLIへ全面置換」だった
+- 関連：`src/checker/SlidevChecker.ts`、`src/cli/PlaywrightCliClient.ts`、`src/checker/PageNavigator.ts`、`src/checker/OverflowDetector.ts`、`src/utils/ScreenshotCapture.ts`
+- 理由：Playwright CLIは`-s`/`PLAYWRIGHT_CLI_SESSION`でセッション分離運用を前提としており、並列化時に最も整合的な設計だから
+- 代替案：
+  - 常に直列実行に固定する
+  - Playwright APIのまま一部ラップのみ行う
+  - 永続プロファイルをデフォルトにする
+- 捨てた理由：
+  - 直列固定は性能要件と要望に合わない
+  - API直結維持は「Playwright_CLIへ置換」に反する
+  - 永続プロファイル標準化は副作用（状態汚染）と運用コストが増える
+- 影響範囲：
+  - `CheckerOptions.browser` の値体系変更（`auto/chrome/msedge/firefox/webkit`）
+  - 実行時依存がPlaywright APIから`playwright-cli`コマンド実行へ移行
+  - `concurrency` の意味を「セッション並列数」として運用
+- 検証：
+  - `npm run build` 通過
+  - `npm test` 通過
+  - `rg`でPlaywright API importが消えていることを確認
+
+- 日時：2026-02-15T16:48:09Z
+- 事項：Playwright CLI実行中のセッション干渉を防ぐため、`close-all/kill-all` によるグローバル後始末を廃止し、各クライアントの `close` のみに統一する
+- 背景：テスト並列実行時に、別テストが保持しているCLIセッションまで閉じられ、`The browser '<session>' is not open` が発生した
+- 関連：`src/checker/SlidevChecker.ts`
+- 理由：Playwright CLIの並列化単位はセッションであり、セッション分離を保つには他プロセス/他テストのセッションに触れないのが正しい
+- 代替案：
+  - `close-all` を維持したままテスト直列化で回避する
+  - 失敗時のみ `kill-all` を実行する
+- 捨てた理由：
+  - テスト直列化は実行時間悪化と運用制約が大きい
+  - 条件付き `kill-all` でも外部セッション巻き込みの本質問題が残る
+- 影響範囲：
+  - `SlidevChecker.check()` の終了処理
+  - 並列テスト時の安定性
+- 検証：
+  - `npx vitest run tests/__tests__/PageNavigator.test.ts tests/__tests__/e2e.test.ts` 通過
+
+- 日時：2026-02-15T16:48:09Z
+- 事項：`run-code` への関数渡しを安定化するため、`page.evaluate` へ直接多行関数を埋め込む方式から、`JSON.stringify` した関数文字列を `eval` 復元する方式へ変更
+- 背景：Windows実行で多行関数やエスケープを含む場合に構文解釈が不安定化し、`SyntaxError: Unexpected token 'if'` が発生した
+- 関連：`src/cli/PlaywrightCliClient.ts`、`src/checker/PageNavigator.ts`
+- 理由：CLI引数としてのコード受け渡しを1行化し、関数本体の改行・エスケープ差異の影響を最小化できる
+- 代替案：
+  - 生の関数文字列をそのまま埋め込む
+  - Base64マーカー付き結果復元を使う
+- 捨てた理由：
+  - 生埋め込みは特定スクリプトで構文崩れが再発した
+  - Base64方式は実行環境で `Buffer` 非対応ケースがあり不安定だった
+- 影響範囲：
+  - `evalJson` / `evalVoid` の実行方式
+  - JSON復元ロジック（`JSON.stringify`戻り値の二段階パース）
+- 検証：
+  - `npx vitest run tests/__tests__/PageNavigator.test.ts` 通過
+
+- 日時：2026-02-15T16:51:31Z
+- 事項：欠損していた `SlidevLauncher` 実装を最小機能で復旧し、既存ユニットテストの参照崩れを解消する
+- 背景：`tests/__tests__/SlidevLauncher.test.ts` が `../../src/launchers/SlidevLauncher` を参照していたが、実体ファイルが存在せず全体テストが失敗していた
+- 関連：`src/launchers/SlidevLauncher.ts`、`src/index.ts`
+- 理由：現在の要件はPlaywright CLI化であり、ランチャーの全面再設計ではなく「既存テストが期待する基本ユーティリティ挙動」を満たす最小実装が最適だから
+- 代替案：
+  - `SlidevLauncher.test.ts` を削除する
+  - テストを別モジュール参照へ書き換える
+- 捨てた理由：
+  - テスト削除は回帰検知能力を下げる
+  - 参照先変更は本来の欠損修復より変更範囲が大きい
+- 影響範囲：
+  - `findAvailablePort` / `stop` / `isRunning` / `getUrl` の提供
+  - パブリックエクスポート (`src/index.ts`)
+- 検証：
+  - `npx vitest run tests/__tests__/SlidevLauncher.test.ts` 通過
+  - `npx vitest run` 全通過（11 files, 117 tests）
+
+- 日時：2026-02-15T17:25:00Z
+- 事項：高速化と保守性向上のため、実行フローをレイヤ分離（interfaces/application/core/infrastructure）へ再編し、検出処理を単一 `run-code` 実行へ統合する
+- 背景：ユーザー要求は「高速化や保守性といった非機能要件を強化するリファクタリングとディレクトリ構成の実装」だった。現行は `SlidevChecker` に責務集中し、検出種別ごとにCLI往復が発生していた
+- 関連：`src/application/usecases/run-overflow-check.ts`、`src/core/detection/detector-script-builder.ts`、`src/core/detection/detector-normalizer.ts`、`src/interfaces/cli/*`、`src/infrastructure/*`、`src/checker/SlidevChecker.ts`
+- 理由：Playwright CLI 呼び出し回数とDOM再走査回数を減らすことが最も直接的に実行時間短縮へ効くため。また責務分離により機能追加時の影響範囲を限定できるため
+- 代替案：
+  - 既存構成を維持しつつ局所最適のみ行う
+  - 並列数調整のみで性能改善を狙う
+- 捨てた理由：
+  - 局所最適のみでは将来の機能拡張時に再び責務集中が発生する
+  - 並列数調整だけではCLI往復コストが残り、改善幅が限定的
+- 影響範囲：
+  - Node公開APIの主経路（`runOverflowCheck`）追加
+  - 既存CLIオプションは互換維持
+  - 検出実装の内部構造変更（出力スキーマは維持）
+- 検証：
+  - `npm test` が通ること
+  - E2E固定シナリオで時間比較できるベンチマークスクリプトが実行可能であること
+
+- 日時：2026-02-15T17:11:47.5805006Z
+- 事項：本ブランチのコードレビューでは、重大バグ・CLI後方互換性・性能退行・テスト抜けを優先観点として評価する
+- 背景：ユーザーがレビュー依頼時に、重点観点と対象ファイルを明示した
+- 関連：`src/application/usecases/run-overflow-check.ts`、`src/application/services/scan-orchestrator.ts`、`src/interfaces/cli/option-parser.ts`、`src/interfaces/cli/command.ts`、`tests/__tests__/OptionParser.test.ts`
+- 理由：影響度の高い不具合と運用リスクを先に検出し、レビュー価値を最大化するため
+- 代替案：
+  - 網羅的に同優先度で確認する
+- 捨てた理由：
+  - 主要リスクの発見が遅れ、レビュー結果の意思決定価値が下がる
+- 影響範囲：
+  - レビュー観点の優先順位
+  - 指摘の提示順（重大度順）
+- 検証：
+  - 指摘一覧が重大度順で提示され、各指摘にファイル/行番号を付与する
+
+- 日時：2026-02-15T17:35:00Z
+- 事項：レビュー指摘のうち、後方互換性に関する項目は採用せず、機能要求に直結する不具合のみ修正する
+- 背景：ユーザーが「後方互換性は不要。その他は本当に重要なら修正」と判断した
+- 関連：`src/application/usecases/run-overflow-check.ts`、`src/interfaces/cli/option-parser.ts`、`src/infrastructure/playwright-cli/page-navigator.ts`、`tests/__tests__/OptionParser.test.ts`、`tests/__tests__/RunOverflowCheckValidation.test.ts`
+- 理由：今回の目的は非機能強化（性能・保守性）であり、互換維持コストより機能信頼性の改善を優先するため
+- 代替案：
+  - CLI/API互換性を優先して `chromium` 受理や旧コンストラクタ契約を維持する
+- 捨てた理由：
+  - 追加互換レイヤの保守コストが増え、今回の目的達成に直接寄与しない
+- 影響範囲：
+  - 入力値バリデーション強化
+  - 解析失敗時の継続実行
+  - スライド遷移待機の正確性
+- 検証：
+  - `npm test` 通過
+- 日時：2026-02-16T12:25:00+09:00
+- 事項：READMEを現行実装準拠に全面改訂し、テスト実行を `npm test`（高速）と `npm run test:e2e`（実ブラウザ）へ分離する
+- 背景：ユーザー要求は「現在の実装に併せてREADMEの改訂やテストの書き直し」。現状はREADME記述と実装差分、および標準テスト実行時間の長さが課題だった
+- 関連：`README.md`、`package.json`、`tests/e2e/e2e.test.ts`、`tests/__tests__/CliCommand.test.ts`、`tests/__tests__/SlidevChecker.test.ts`
+- 理由：利用者が最新CLI仕様を誤解なく使える状態にしつつ、日常開発時の回帰確認を短時間化するため
+- 代替案：
+  - `npm test` にE2Eを残したままREADMEのみ更新する
+  - 内部実装詳細中心のREADMEへ寄せる
+- 捨てた理由：
+  - E2E同梱のままだと反復開発コストが高く、非機能要件（開発効率）改善が弱い
+  - README利用者中心方針と合致しない
+- 影響範囲：
+  - テスト実行コマンド運用
+  - READMEのCLI/API記載
+  - 回帰テストの境界（公開API/CLI）
+- 検証：
+  - `npm test` 通過
+  - `npm run test:e2e` 通過
+- 日時：2026-02-16T12:45:00+09:00
+- 事項：`CONTRIBUTING.md` を現行構成に合わせて全面改訂し、`package.json`/`vitest.config.ts` の運用設定を同期した
+- 背景：ユーザー要望は「CONTRIBUTINGの名前やpackageやconfigなども改訂。不要なら削除」。既存CONTRIBUTINGには存在しない `npm run check` 参照など実態不一致があった
+- 関連：`CONTRIBUTING.md`、`package.json`、`vitest.config.ts`
+- 理由：ドキュメントと実行コマンドの不一致はオンボーディングと保守運用の失敗要因になるため
+- 代替案：
+  - CONTRIBUTINGのみ修正し package/config は未変更とする
+- 捨てた理由：
+  - 要望の「packageやconfig改訂」を満たし切れず、将来また乖離が発生しやすい
+- 影響範囲：
+  - 開発手順ドキュメント
+  - スクリプト運用（`npm run check` 追加）
+  - Vitest対象/除外パターン
+- 検証：
+  - `npm run check` 通過
+  - `npm run test:e2e` 通過
+- 日時：2026-02-16T12:55:00+09:00
+- 事項：`package.json` から未整備の `lint`/`check` スクリプトを削除し、`CONTRIBUTING.md` の開発コマンド記載を同期した
+- 背景：`npm run check` 実行時に ESLint v9 の設定ファイル不在で失敗した。ユーザー要望は「不要なら削除」だった
+- 関連：`package.json`、`CONTRIBUTING.md`
+- 理由：現時点で機能しない導線を残すより、実際に使えるコマンドのみ提示する方が保守性が高い
+- 代替案：
+  - `eslint.config.js` を新規追加して lint 導線を維持する
+- 捨てた理由：
+  - 今回要望はドキュメント/構成同期であり、Lint方針策定まで含めると変更範囲が過大になる
+- 影響範囲：
+  - 開発者向け実行コマンド
+  - package scripts
+- 検証：
+  - `npm test` 通過
+  - `npm run test:e2e` 通過
+- 日時：2026-02-16T13:30:00+09:00
+- 事項：旧実装互換層（`src/checker|reporters|utils|parsers|calibration|src/cli/PlaywrightCliClient.ts`）を撤去し、現行レイヤ（`core`/`infrastructure`/`application`/`interfaces`）へ一本化した
+- 背景：ユーザー要求は「元実装から変わっていないことで現実装と乖離が生まれているもの、現実装では不要になったものをまとめて修正」。互換層の残存により、実体と公開経路の不一致が継続していた
+- 関連：`src/index.ts`、`src/application/services/scan-orchestrator.ts`、`src/application/services/analysis-orchestrator.ts`、`src/infrastructure/playwright-cli/client.ts`、`src/infrastructure/markdown/*`、`src/core/analysis/*`、`tests/e2e/e2e.test.ts`
+- 理由：現行実装に責務を集約しない限り、保守時に旧パス/新パスの二重メンテナンスが発生し続けるため
+- 代替案：
+  - 互換ラッパを残したままドキュメントのみ同期する
+  - 旧公開APIだけ残して内部配置のみ整理する
+- 捨てた理由：
+  - 問題の根本（乖離の温床）が残り、将来の改修コストと誤用リスクが高い
+- 影響範囲：
+  - 公開API（`SlidevChecker`/`PageNavigator`/`OverflowDetector` のエクスポート削除）
+  - importパス（テスト含む）
+  - 旧ディレクトリ削除
+- 検証：
+  - `npm test` 通過
+  - `npm run test:e2e` 通過
+  - `npm run build` 通過
+  - `npm run test:all` 通過
+
+- 日時：2026-02-16T13:31:00+09:00
+- 事項：未運用のLint導線を正式に廃止し、`eslint`/`@typescript-eslint/*` と `.eslintrc.json` を削除した
+- 背景：方針として「lintは一旦削除」を選択済みで、実際にESLint v9の設定不整合が存在していた
+- 関連：`package.json`、`package-lock.json`、`.eslintrc.json`
+- 理由：現時点で機能しない導線を残すより、実行可能な運用（build/test/format）のみ維持する方が保守性が高いため
+- 代替案：
+  - `eslint.config.js` を追加してlint運用を継続する
+- 捨てた理由：
+  - 今回の主目的（乖離・不要物整理）より作業範囲が拡大する
+- 影響範囲：
+  - 開発時の検証コマンド体系
+  - 依存パッケージ
+- 検証：
+  - `npm test` 通過
+  - `npm run build` 通過
+- 日時：2026-02-16T13:45:00+09:00
+- 事項：プロダクト名を変更し、既存Git追跡（旧履歴）を破棄して新規リポジトリとしてGitHub公開する方針を採用
+- 背景：ユーザー判断として「変更が大きいため、旧実装由来の履歴を切り離して新しいものとして公開したい」が提示された
+- 関連：`package.json`、`README.md`、`CONTRIBUTING.md`、`.git`、GitHubリモート設定
+- 理由：大規模リファクタ後の文脈を新規プロダクトとして再定義し、履歴ノイズと互換性前提を断ち切るため
+- 代替案：
+  - 既存履歴を維持したまま rename のみ実施
+- 捨てた理由：
+  - 旧設計との連続性が強く残り、公開時の意図と一致しない
+- 影響範囲：
+  - npmパッケージ名/CLI名/README記載
+  - Git履歴（初期化）
+  - GitHub公開先
+- 検証：
+  - リネーム後に `npm run build` / `npm test` が通ること
+  - 新規リポジトリへ初回pushできること
