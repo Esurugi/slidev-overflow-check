@@ -221,3 +221,20 @@
 - 検証：
   - リネーム後に `npm run build` / `npm test` が通ること
   - 新規リポジトリへ初回pushできること
+- 日時：2026-02-16T13:55:00+09:00
+- 事項：新プロダクト名を `slidev-overflow-check` に決定し、ローカルのGit履歴を再初期化して新規ルートコミットを作成した
+- 背景：ユーザーの明示指示「プロダクト名を変えて旧実装のGit追跡を削除して新しいものとしてGithubに上げる」に基づく
+- 関連：`package.json`、`src/interfaces/cli/command.ts`、`README.md`、`CONTRIBUTING.md`、`templates/fix-slidev-overflow.md`、`.git`
+- 理由：大規模改修後の実装を新規プロダクトとして独立公開するため
+- 代替案：
+  - 旧Git履歴を残したまま rename のみ実施
+- 捨てた理由：
+  - 旧実装文脈が履歴に残り、公開意図（新規プロダクト化）と一致しない
+- 影響範囲：
+  - npm名/CLI名/README記載/テンプレ記載
+  - Git履歴（`.git` 再初期化）
+  - 既存リモート設定の消失
+- 検証：
+  - `npm test` 通過
+  - `git init` 実行済み
+  - `git commit` でルートコミット作成済み
