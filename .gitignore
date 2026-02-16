@@ -56,3 +56,9 @@ AGENTS.md
 CLAUDE.md
 REQUIREMENTS.md
 SPECIFICATION.md
+
+# Track only this local project skill
+!.claude/
+!.claude/skills/
+!.claude/skills/slidev-overflow-check-cli/
+!.claude/skills/slidev-overflow-check-cli/**

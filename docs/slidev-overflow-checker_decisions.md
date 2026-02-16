@@ -238,3 +238,20 @@
   - `npm test` 通過
   - `git init` 実行済み
   - `git commit` でルートコミット作成済み
+- 日時：2026-02-16T14:20:00+09:00
+- 事項：`slidev-overflow-check-cli` スキルを新規作成し、配置先を本リポジトリ (`.claude/skills`) と `D:\project\slidev_CC\.claude\skills` の2箇所に限定する
+- 背景：ユーザーが `$skill-creator` 指定で「このCLIツールに関するスキル作成」「グローバルには追加しない」を明示した
+- 関連：`.claude/skills/slidev-overflow-check-cli/SKILL.md`、`.claude/skills/slidev-overflow-check-cli/agents/openai.yaml`、`.claude/skills/slidev-overflow-check-cli/references/*`
+- 理由：プロジェクトローカル運用と別ワークスペースのローカル運用を両立しつつ、グローバルスキル汚染を避けるため
+- 代替案：
+  - グローバル (`C:\Users\81702\.codex\skills`) にのみ追加する
+  - リポジトリ内のみに追加する
+- 捨てた理由：
+  - グローバルのみではユーザー指定に反する
+  - リポジトリ内のみでは `slidev_CC` 側利用要件を満たせない
+- 影響範囲：
+  - スキル呼び出し運用
+  - 将来のCLI保守タスクの手順標準化
+- 検証：
+  - スキル構造バリデーション通過
+  - 2箇所に同一スキルが存在すること

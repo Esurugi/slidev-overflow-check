@@ -1,0 +1,4 @@
+interface:
+  display_name: "Slidev Overflow Check CLI"
+  short_description: "Run, tune, and maintain slidev-overflow-check CLI workflows."
+  default_prompt: "Use $slidev-overflow-check-cli to run and troubleshoot overflow checks for my Slidev project."
