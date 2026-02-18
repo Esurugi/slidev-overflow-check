@@ -3,20 +3,6 @@
 Slidevプレゼンテーションを実ブラウザで描画し、見切れ（overflow）を検出するCLIです。  
 Playwright CLIセッションを使って、`text-overflow` / `element-overflow` / `scrollbar` を検出します。
 
-## クイックスタート
-
-```bash
-# 1) インストール
-npm install -g slidev-overflow-check
-
-# 2) Slidevを起動（別ターミナル）
-cd your-slidev-project
-npx slidev dev
-
-# 3) チェック実行
-slidev-overflow-check --url http://localhost:3030
-```
-
 ## 主な特徴
 
 - 実レンダリングベースで検出（Markdown静的解析だけに依存しない）
